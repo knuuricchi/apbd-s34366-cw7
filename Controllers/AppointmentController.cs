@@ -48,6 +48,41 @@ public class AppointmentController : ControllerBase
         return Ok(list);
     }
     
+    [HttpGet("{id}")]
+    public async Task<IActionResult> GetAppointment(int idAppointment)
+    {
+        await using var conn = new SqlConnection(GetConnectionString());
+    
+        string sql = "SELECT a.IdAppointment, a.AppointmentDate, a.Status, a.Reason, " +
+                     "p.FirstName + ' ' + p.LastName AS PatientName, " +
+                     "d.FirstName + ' ' + d.LastName AS DoctorName, a.InternalNotes " +
+                     "FROM Appointments a " +
+                     "JOIN Patients p ON a.IdPatient = p.IdPatient " +
+                     "JOIN Doctors d ON a.IdDoctor = d.IdDoctor " +
+                     "WHERE a.IdAppointment = @Id";
+
+        var cmd = new SqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@Id", idAppointment);
+
+        await conn.OpenAsync();
+        await using var reader = await cmd.ExecuteReaderAsync();
+        
+        if (!await reader.ReadAsync())
+        {
+            return NotFound(new { Message = "Appointment not found." });
+        }
+        
+        var res = new
+        {
+            IdAppointment = (int)reader["IdAppointment"],
+            Date = (DateTime)reader["AppointmentDate"],
+            Status = reader["Status"].ToString(),
+            Patient = reader["PatientName"].ToString(),
+            Doctor = reader["DoctorName"].ToString()
+        };
+        return Ok(res);
+    }
+    
     private string GetConnectionString()
     {
         return _configuration.GetConnectionString("DefaultConnection") 
