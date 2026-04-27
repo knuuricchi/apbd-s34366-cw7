@@ -4,6 +4,7 @@ builder.Services.AddControllers();
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.AddScoped<apbd_s34366_cw7.Services.IAppointmentService, apbd_s34366_cw7.Services.AppointmentService>();
 
 var app = builder.Build();
 
