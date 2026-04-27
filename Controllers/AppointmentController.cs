@@ -14,18 +14,22 @@ public class AppointmentController : ControllerBase
     {
         _configuration = configuration;
     }
+
+    #region GET
     
     [HttpGet]
     public async Task<IActionResult> GetAppointments()
     {
         await using var conn = new SqlConnection(GetConnectionString());
 
-        var query = "SELECT a.IdAppointment, a.AppointmentDate, a.Status, " +
-                  "p.FirstName + ' ' + p.LastName AS PatientName, " +
-                  "d.FirstName + ' ' + d.LastName AS DoctorName " +
-                  "FROM Appointments a " +
-                  "JOIN Patients p ON a.IdPatient = p.IdPatient "+
-                    "JOIN Doctors d ON a.IdDoctor = d.IdDoctor";
+        var query = @"
+            SELECT a.IdAppointment, a.AppointmentDate, a.Status,
+            p.FirstName + ' ' + p.LastName AS PatientName,
+            d.FirstName + ' ' + d.LastName AS DoctorName
+            FROM Appointments a
+            JOIN Patients p ON a.IdPatient = p.IdPatient
+            JOIN Doctors d ON a.IdDoctor = d.IdDoctor";
+        
         var cmd = new SqlCommand(query, conn);
         var list = new List<AppointmentListDto>(); 
     
@@ -46,6 +50,10 @@ public class AppointmentController : ControllerBase
 
         return Ok(list);
     }
+
+    #endregion
+
+    #region GET BY ID
     
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetAppointment(int id)
@@ -53,7 +61,7 @@ public class AppointmentController : ControllerBase
         await using var conn = new SqlConnection(GetConnectionString());
     
         string query = @"
-            SELECT a.IdAppointment, a.AppointmentDate, a.Status,
+                SELECT a.IdAppointment, a.AppointmentDate, a.Status,
                 p.FirstName + ' ' + p.LastName AS PatientName,
                 d.FirstName + ' ' + d.LastName AS DoctorName
                 FROM Appointments a
@@ -84,49 +92,67 @@ public class AppointmentController : ControllerBase
         return Ok(res);
     }
 
+    #endregion
+    
+    #region POST
+    
     [HttpPost] 
     public async Task<IActionResult> CreateAppointment(CreateAppointmentRequestDto request) 
     {
-    if (request.AppointmentDate < DateTime.Now) 
-        return BadRequest("Date must be greather than today.");
+        if (request.AppointmentDate < DateTime.Now) 
+            return BadRequest("Date must be greather than today.");
     
-    if (string.IsNullOrEmpty(request.Reason) || request.Reason.Length > 250)
-        return BadRequest("Reason is required.");
+        if (string.IsNullOrEmpty(request.Reason) || request.Reason.Length > 250)
+            return BadRequest("Reason is required.");
 
-    await using var conn = new SqlConnection(GetConnectionString());
-    await conn.OpenAsync();
+        await using var conn = new SqlConnection(GetConnectionString());
+        await conn.OpenAsync();
 
-    var checkIfExistsCmd = new SqlCommand(
-        "SELECT (SELECT COUNT(*) FROM Patients WHERE IdPatient = @IdP AND IsActive = 1) + " +
-        "(SELECT COUNT(*) FROM Doctors WHERE IdDoctor = @IdD AND IsActive = 1)", conn);
+        var checkIfExistsCmd = new SqlCommand(
+            "SELECT (SELECT COUNT(*) FROM Patients WHERE IdPatient = @IdP AND IsActive = 1) + " +
+            "(SELECT COUNT(*) FROM Doctors WHERE IdDoctor = @IdD AND IsActive = 1)", conn);
     
-    checkIfExistsCmd.Parameters.AddWithValue("@IdP", request.IdPatient);
-    checkIfExistsCmd.Parameters.AddWithValue("@IdD", request.IdDoctor);
+        checkIfExistsCmd.Parameters.AddWithValue("@IdP", request.IdPatient);
+        checkIfExistsCmd.Parameters.AddWithValue("@IdD", request.IdDoctor);
     
-    var conflictCmd = new SqlCommand(
-        "SELECT COUNT(*) FROM Appointments WHERE IdDoctor = @IdD AND AppointmentDate = @Date AND Status = 'Scheduled'", conn);
+        var conflictCmd = new SqlCommand(@"
+                SELECT COUNT(*) FROM Appointments 
+                WHERE IdDoctor = @IdD 
+                AND AppointmentDate = @Date
+                AND Status = 'Scheduled'"
+            , conn);
     
-    conflictCmd.Parameters.AddWithValue("@IdD", request.IdDoctor);
-    conflictCmd.Parameters.AddWithValue("@Date", request.AppointmentDate);
+        conflictCmd.Parameters.AddWithValue("@IdD", request.IdDoctor);
+        
+        conflictCmd.Parameters.AddWithValue("@Date", request.AppointmentDate);
 
-    if ((int)await conflictCmd.ExecuteScalarAsync() > 0)
-        return Conflict("Doctor is busy at this specific time.");
+        if ((int)await conflictCmd.ExecuteScalarAsync() > 0)
+            return Conflict("Doctor is busy at this specific time");
 
-    var insertCmd = new SqlCommand(
-        "INSERT INTO Appointments (IdPatient, IdDoctor, AppointmentDate, Status, Reason, CreatedAt) " +
-        "VALUES (@IdP, @IdD, @Date, 'Scheduled', @Reason, GETDATE())", conn);
+        var insertCmd = new SqlCommand(@"
+            INSERT INTO Appointments 
+            (IdPatient, IdDoctor, AppointmentDate, Status, Reason, CreatedAt)
+            VALUES (@IdP, @IdD, @Date, 'Scheduled', @Reason, GETDATE())", conn
+        );
 
-    insertCmd.Parameters.AddWithValue("@IdP", request.IdPatient);
-    insertCmd.Parameters.AddWithValue("@IdD", request.IdDoctor);
-    insertCmd.Parameters.AddWithValue("@Date", request.AppointmentDate);
-    insertCmd.Parameters.AddWithValue("@Reason", request.Reason);
+        insertCmd.Parameters.AddWithValue("@IdP", request.IdPatient);
+        insertCmd.Parameters.AddWithValue("@IdD", request.IdDoctor);
+        insertCmd.Parameters.AddWithValue("@Date", request.AppointmentDate);
+        insertCmd.Parameters.AddWithValue("@Reason", request.Reason);
 
-    await insertCmd.ExecuteNonQueryAsync();
+        await insertCmd.ExecuteNonQueryAsync();
 
-    return StatusCode(201);
-}
+        return StatusCode(201);
+    }
+
+    #endregion
     
-    
+    [HttpDelete("{id:int}")]
+    public async Task<IActionResult> DeleteAppointment(int id)
+    {
+        throw new NotImplementedException();
+    }
+
     private string GetConnectionString()
     {
         var connectionString = _configuration.GetConnectionString("DefaultConnection");
