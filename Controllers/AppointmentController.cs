@@ -54,44 +54,50 @@ public class AppointmentController : ControllerBase
     #endregion
 
     #region GET BY ID
-    
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetAppointment(int id)
     {
         await using var conn = new SqlConnection(GetConnectionString());
-    
+
         string query = @"
-                SELECT a.IdAppointment, a.AppointmentDate, a.Status,
+            SELECT 
+                a.IdAppointment, a.AppointmentDate, a.Status, a.Reason, a.InternalNotes, a.CreatedAt,
                 p.FirstName + ' ' + p.LastName AS PatientName,
-                d.FirstName + ' ' + d.LastName AS DoctorName
-                FROM Appointments a
-                JOIN Patients p ON a.IdPatient = p.IdPatient
-                JOIN Doctors d ON a.IdDoctor = d.IdDoctor
-                WHERE a.IdAppointment = @Id";
+                p.Email AS PatientEmail,
+                d.FirstName + ' ' + d.LastName AS DoctorName,
+                d.LicenseNumber
+            FROM Appointments a
+            JOIN Patients p ON a.IdPatient = p.IdPatient
+            JOIN Doctors d ON a.IdDoctor = d.IdDoctor
+            WHERE a.IdAppointment = @Id";
 
         var cmd = new SqlCommand(query, conn);
         cmd.Parameters.AddWithValue("@Id", id);
 
         await conn.OpenAsync();
         await using var reader = await cmd.ExecuteReaderAsync();
-        
+    
         if (!await reader.ReadAsync())
         {
             return NotFound(new { Message = "Appointment not found." });
         }
-        
-        var res = new AppointmentListDto
+    
+        var res = new AppointmentDetailsDto
         {
             IdAppointment = (int)reader["IdAppointment"],
             AppointmentDate = (DateTime)reader["AppointmentDate"],
             Status = reader["Status"].ToString()!,
+            Reason = reader["Reason"].ToString()!,
             PatientFullName = reader["PatientName"].ToString()!,
-            DoctorFullName = reader["DoctorName"].ToString()!
+            PatientEmail = reader["PatientEmail"].ToString()!,
+            DoctorFullName = reader["DoctorName"].ToString()!,
+            LicenseNumber = reader["LicenseNumber"].ToString()!,
+            InternalNotes = reader["InternalNotes"] == DBNull.Value ? null : reader["InternalNotes"].ToString(),
+            CreatedAt = (DateTime)reader["CreatedAt"]
         };
 
         return Ok(res);
     }
-
     #endregion
     
     #region POST
@@ -100,7 +106,7 @@ public class AppointmentController : ControllerBase
     public async Task<IActionResult> CreateAppointment(CreateAppointmentRequestDto request) 
     {
         if (request.AppointmentDate < DateTime.Now) 
-            return BadRequest("Date must be greather than today.");
+            return BadRequest("Date must be greater than today.");
     
         if (string.IsNullOrEmpty(request.Reason) || request.Reason.Length > 250)
             return BadRequest("Reason is required.");
@@ -109,12 +115,20 @@ public class AppointmentController : ControllerBase
         await conn.OpenAsync();
 
         var checkIfExistsCmd = new SqlCommand(
-            "SELECT (SELECT COUNT(*) FROM Patients WHERE IdPatient = @IdP AND IsActive = 1) + " +
-            "(SELECT COUNT(*) FROM Doctors WHERE IdDoctor = @IdD AND IsActive = 1)", conn);
+            @"SELECT (
+            SELECT COUNT(*) 
+            FROM Patients 
+            WHERE IdPatient = @IdP 
+            AND IsActive = 1)
+                (SELECT COUNT(*) 
+                FROM Doctors 
+                WHERE IdDoctor = @IdD 
+                AND IsActive = 1)", 
+            conn);
     
         checkIfExistsCmd.Parameters.AddWithValue("@IdP", request.IdPatient);
         checkIfExistsCmd.Parameters.AddWithValue("@IdD", request.IdDoctor);
-    
+        
         var conflictCmd = new SqlCommand(@"
                 SELECT COUNT(*) FROM Appointments 
                 WHERE IdDoctor = @IdD 
@@ -146,12 +160,42 @@ public class AppointmentController : ControllerBase
     }
 
     #endregion
-    
+
+    #region DELETE
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> DeleteAppointment(int id)
     {
-        throw new NotImplementedException();
+        await using var conn = new SqlConnection(GetConnectionString());
+        await conn.OpenAsync();
+
+        var checkCmd = new SqlCommand(@"
+            SELECT Status 
+            FROM Appointments
+            WHERE IdAppointment = @Id", conn);
+        checkCmd.Parameters.AddWithValue("@Id", id);
+
+        await using var reader = await checkCmd.ExecuteReaderAsync();
+        if (!await reader.ReadAsync())
+        {
+            return NotFound(new { Message = "Appointment not found." });
+        }
+
+        var status = reader["Status"].ToString();
+        await reader.CloseAsync();
+
+        if (status == "Completed")
+        {
+            return BadRequest("Cannot delete a completed appointment.");
+        }
+
+        var deleteCmd = new SqlCommand(@"DELETE FROM Appointments WHERE IdAppointment = @Id", conn);
+        deleteCmd.Parameters.AddWithValue("@Id", id);
+    
+        await deleteCmd.ExecuteNonQueryAsync();
+
+        return NoContent();
     }
+    #endregion
 
     private string GetConnectionString()
     {
